@@ -35,30 +35,43 @@
 
 (defcustom lsp-clients-php-server-command
   `("php" ,(expand-file-name "~/.composer/vendor/felixfbecker/language-server/bin/php-language-server.php"))
-  "Install directory for php-language-server."
+  "Command to run php-ls."
   :group 'lsp-php
   :type '(repeat string))
 
-(defun lsp-php--create-connection ()
-  "Create lsp connection."
-  (lsp-stdio-connection
-   (lambda () lsp-clients-php-server-command)
-   (lambda ()
-     (if (and (cdr lsp-clients-php-server-command)
-              (eq (string-match-p "php[0-9.]*\\'" (car lsp-clients-php-server-command)) 0))
-         ;; Start with the php command and the list has more elems. Test the existence of the PHP script.
-         (let ((php-file (nth 1 lsp-clients-php-server-command)))
-           (or (file-exists-p php-file)
-               (progn
-                 (lsp-log "%s is not present." php-file)
-                 nil)))
-       t))))
+(defcustom lsp-php-memory-limit "4095M"
+  "Maximum amount of RAM php-ls should consume.
+Passed as its --memory-limit argument."
+  :group 'lsp-php
+  :type '(integer))
+
+(defun lsp-php--get-command-stdio ()
+  "Yield a list of arguments to start php-ls.
+The started server will listen on stdio. Respects
+`lsp-clients-php-server-command'.'"
+  `(,@lsp-clients-php-server-command
+    ,(format "--memory-limit=%s" lsp-php-memory-limit)))
+
+(defun lsp-php--get-php-script (argv)
+  "Get the name of the PHP script run by ARGV.
+Handle the case of the first element of the latter being the php
+interpreter itself."
+  (and argv (or (and (string-match-p "php[-.0-9]*" (car argv)) (cadr argv))
+                (car argv))))
+
+(defun lsp-php--present? ()
+  "Check if 'php-ls' is installed."
+  ;; we cannot rely on the default facilities, as PHP itself may be installed
+  ;; even though php-ls is not.
+  (file-exists-p (lsp-php--get-php-script (lsp-php--get-command-stdio))))
 
 (lsp-register-client
- (make-lsp-client :new-connection (lsp-php--create-connection)
-                  :major-modes '(php-mode)
-                  :priority -3
-                  :server-id 'php-ls))
+ (make-lsp-client
+  :new-connection
+  (lsp-stdio-connection #'lsp-php--get-command-stdio #'lsp-php--present?)
+  :major-modes '(php-mode)
+  :priority -3
+  :server-id 'php-ls))
 
 ;;; Intelephense
 (defgroup lsp-intelephense nil
@@ -325,11 +338,11 @@ already present."
 
 (defun lsp-serenata-init-options ()
   "Init options for lsp-serenata."
-  `( :configuration ( :uris ,lsp-serenata-uris
-                      :indexDatabaseUri ,lsp-serenata-index-database-uri
-                      :phpVersion ,lsp-serenata-php-version
-                      :excludedPathExpressions ,lsp-serenata-exclude-path-expressions
-                      :fileExtensions ,lsp-serenata-file-extensions)))
+  `( :config ( :uris ,lsp-serenata-uris
+               :indexDatabaseUri ,lsp-serenata-index-database-uri
+               :phpVersion ,lsp-serenata-php-version
+               :excludedPathExpressions ,lsp-serenata-exclude-path-expressions
+               :fileExtensions ,lsp-serenata-file-extensions)))
 
 
 (lsp-interface (serenata:didProgressIndexing (:sequenceOfIndexedItem :totalItemsToIndex :progressPercentage :folderUri :fileUri :info) nil ))
